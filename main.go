@@ -9,6 +9,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"dockit-desktop/bindings"
+	"dockit-desktop/internal/infrastructure/crypto"
 	"dockit-desktop/internal/infrastructure/database"
 	"dockit-desktop/internal/infrastructure/docker"
 	"dockit-desktop/internal/infrastructure/httpclient"
@@ -38,14 +39,22 @@ func main() {
 	apiUC := usecase.NewAPIUsecase(httpClient, dbClient)
 	dbManagerUC := usecase.NewDbManagerUsecase()
 
+	// Ortam yönetimi için kripto servisi (keyring tabanlı AES-256-GCM)
+	cryptoService, err := crypto.NewCryptoService()
+	if err != nil {
+		log.Fatalf("Kripto servisi başlatılamadı: %v", err)
+	}
+	envUC := usecase.NewEnvManagerUsecase(dbClient, cryptoService)
+
 	// 3. Initialize Bindings
 	dockerBinding := bindings.NewDockerBinding(dockerUC)
 	dbBinding := bindings.NewDatabaseBinding(dbUC)
 	apiBinding := bindings.NewAPIBinding(apiUC)
 	dbManagerBinding := bindings.NewDbManagerBinding(dbManagerUC)
+	envBinding := bindings.NewEnvBinding(envUC, apiUC)
 
 	// Create an instance of the app structure
-	app := NewApp(dockerBinding, dbBinding, apiBinding, dbManagerBinding)
+	app := NewApp(dockerBinding, dbBinding, apiBinding, dbManagerBinding, envBinding)
 
 	// Create application with options
 	err = wails.Run(&options.App{
@@ -63,6 +72,7 @@ func main() {
 			dbBinding,
 			apiBinding,
 			dbManagerBinding,
+			envBinding,
 		},
 	})
 
