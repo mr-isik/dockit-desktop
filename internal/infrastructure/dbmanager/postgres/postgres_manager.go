@@ -4,6 +4,10 @@ import (
 	"context"
 	"dockit-desktop/internal/domain"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,15 +31,12 @@ func (p *PostgresManager) Connect(ctx context.Context, conn domain.DbConnection)
 		p.pool.Close()
 	}
 
-	sslMode := conn.SSLMode
+	sslMode := strings.TrimSpace(conn.SSLMode)
 	if sslMode == "" {
-		sslMode = "disable"
+		sslMode = "prefer"
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		conn.Host, conn.Port, conn.User, conn.Password, conn.Database, sslMode,
-	)
+	dsn := buildPostgresDSN(conn, sslMode)
 
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -268,4 +269,42 @@ func (p *PostgresManager) checkConnection() error {
 // collectRows, pgx.Rows'u tek satır slice'ına çeker (yardımcı).
 func collectRows[T any](rows pgx.Rows, scanFn func(pgx.CollectableRow) (T, error)) ([]T, error) {
 	return pgx.CollectRows(rows, scanFn)
+}
+
+func buildPostgresDSN(conn domain.DbConnection, sslMode string) string {
+	host := strings.TrimSpace(conn.Host)
+	if host == "" {
+		host = "localhost"
+	}
+	port := conn.Port
+	if port == 0 {
+		port = 5432
+	}
+	user := strings.TrimSpace(conn.User)
+	dbName := strings.TrimSpace(conn.Database)
+
+	var userInfo *url.Userinfo
+	if user != "" {
+		if conn.Password != "" {
+			userInfo = url.UserPassword(user, conn.Password)
+		} else {
+			userInfo = url.User(user)
+		}
+	}
+
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   userInfo,
+		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+	}
+	if dbName != "" {
+		u.Path = "/" + dbName
+	}
+
+	q := u.Query()
+	if sslMode != "" {
+		q.Set("sslmode", sslMode)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
